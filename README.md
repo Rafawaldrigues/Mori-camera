@@ -1,4 +1,4 @@
-# Meu App Câmera
+# Mori recorder 
 
 App Flutter (Android + iOS) que grava vídeo em sessões, cortando
 automaticamente em clipes de duração pré-definida, salvos na memória
@@ -19,7 +19,7 @@ local do dispositivo (sem backend, sem banco de dados).
   (`video_segmenter_service.dart`).
 - `test/` — testes unitários espelhando a estrutura de `lib/`.
 
-## Próximos passos
+## Para iniciar 
 
 1. Rodar `flutter create .` na raiz para gerar as pastas nativas
    completas de `android/` e `ios/` (os `.gitkeep` aqui são só
