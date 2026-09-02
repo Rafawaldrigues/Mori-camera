@@ -1,0 +1,40 @@
+name: meu_app_camera
+description: App de câmera que grava vídeo em clipes de duração pré-definida, salvos localmente.
+publish_to: 'none'
+version: 0.1.0
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Acesso à câmera nativa (preview, captura de vídeo).
+  camera: ^0.10.5
+
+  # Encontrar diretórios do sistema (ex: pasta de documentos do app).
+  path_provider: ^2.1.1
+
+  # Manipulação de caminhos de arquivo de forma multiplataforma.
+  path: ^1.8.3
+
+  # Solicitar/verificar permissões de câmera e microfone.
+  permission_handler: ^11.0.1
+
+  # Reproduzir os clipes salvos na tela de player.
+  video_player: ^2.8.1
+
+  # OPCIONAL: descomente se optar por gravar contínuo e cortar depois.
+  # ffmpeg_kit_flutter: ^6.0.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0
+
+flutter:
+  uses-material-design: true
+  # assets:
+  #   - assets/icons/
+  #   - assets/images/

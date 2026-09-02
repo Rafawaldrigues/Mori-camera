@@ -1,0 +1,11 @@
+# REGRAS DE LINT DO PROJETO.
+# Usar para: manter o código consistente em estilo (usa o pacote
+# flutter_lints como base). Ajuste as regras conforme a preferência do
+# time/projeto.
+
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    prefer_const_constructors: true
+    avoid_print: true
