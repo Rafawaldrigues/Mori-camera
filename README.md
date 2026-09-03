@@ -1,37 +1,17 @@
-# Mori recorder 
+# MoriRecorder — Swift Playgrounds
 
-App Flutter (Android + iOS) que grava vídeo em sessões, cortando
-automaticamente em clipes de duração pré-definida, salvos na memória
-local do dispositivo (sem backend, sem banco de dados).
+Projeto convertido para `.swiftpm`, pronto para abrir no Swift Playgrounds no iPad.
 
-## Estrutura do projeto
+## Correção da câmera 0.5x
 
-- `lib/main.dart` — bootstrap do app.
-- `lib/app/` — configuração do MaterialApp, tema e rotas.
-- `lib/core/` — constantes, tema visual e utilitários (nomenclatura de
-  arquivo, permissões).
-- `lib/features/camera/` — tudo relacionado à gravação (repository, tela,
-  widgets, controller de estado).
-- `lib/features/clips/` — listagem e reprodução dos clipes salvos.
-- `lib/features/settings/` — configurações do usuário (opcional).
-- `lib/services/` — acesso a sistema de arquivos (`storage_service.dart`)
-  e, opcionalmente, segmentação via ffmpeg
-  (`video_segmenter_service.dart`).
-- `test/` — testes unitários espelhando a estrutura de `lib/`.
+A versão anterior usava `DiscoverySession.devices.first`, que pode selecionar uma câmera virtual em vez da câmera Wide Angle física. No iPhone 15 isso pode fazer `videoZoomFactor = 1.0` resultar na lente ultra-wide (0.5x).
 
-## Para iniciar 
+A versão corrigida seleciona explicitamente:
 
-1. Rodar `flutter create .` na raiz para gerar as pastas nativas
-   completas de `android/` e `ios/` (os `.gitkeep` aqui são só
-   placeholders).
-2. Rodar `flutter pub get` para instalar as dependências do
-   `pubspec.yaml`.
-3. Configurar permissões nativas:
-   - **Android**: `android/app/src/main/AndroidManifest.xml` — adicionar
-     `CAMERA` e `RECORD_AUDIO`.
-   - **iOS**: `ios/Runner/Info.plist` — adicionar
-     `NSCameraUsageDescription` e `NSMicrophoneUsageDescription`.
-4. Implementar a lógica em `camera_repository.dart` (já tem um
-   esqueleto funcional da estratégia de start/stop em loop).
-5. Decidir entre gravação em segmentos direto ou gravação contínua +
-   corte via ffmpeg (ver comentário em `video_segmenter_service.dart`).
+`AVCaptureDevice.default(.builtInWideAngleCamera, for: .video, position: ...)`
+
+Também reseta o zoom para `1.0` ao inicializar e encerra uma sessão anterior antes de recriá-la.
+
+## iPad
+
+Abra este `.swiftpm` no Swift Playgrounds e execute no iPad. O pacote mantém o código original e aplica a correção da seleção da câmera.
