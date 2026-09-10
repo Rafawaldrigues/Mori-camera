@@ -1,18 +1,6 @@
-# Padrão Flutter
-.dart_tool/
-.packages
-build/
-.flutter-plugins
-.flutter-plugins-dependencies
-*.iml
-.idea/
-
-# iOS / Android build artifacts
-ios/Pods/
-ios/.symlinks/
-android/.gradle/
-android/app/build/
-
-# Clipes gravados NÃO devem ir para o controle de versão
-# (caso você salve algum vídeo de teste dentro do projeto por engano)
-*.mp4
+.DS_Store
+.build/
+.swiftpm/
+DerivedData/
+xcuserdata/
+*.xcuserstate
