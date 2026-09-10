@@ -31,7 +31,15 @@ class CameraManager: NSObject, ObservableObject {
     @Published var videoQuality: VideoQuality = .hd1080
     @Published var hdrEnabled: Bool = true
     @Published var stabilizationEnabled: Bool = true
-    @Published var audioEnabled: Bool = true
+    let audioEnabled: Bool = true
+    @Published var aspectRatio: CaptureAspect = .wide
+    @Published var zoomOptions: [CGFloat] = [1, 2]
+    @Published var exposureRange: ClosedRange<Float> = -2...2
+    @Published var cameraError: String?
+    private let sessionQueue = DispatchQueue(label: "MoriRecorder.camera")
+    private var zoomMultiplier: CGFloat = 1
+    private var recordingAspect: CGFloat = 9.0 / 16.0
+    private var recordingID: UUID?
     @Published var isRecording: Bool = false
     @Published var previewLayer: AVCaptureVideoPreviewLayer?
     @Published var isSessionReady: Bool = false
@@ -53,18 +61,24 @@ class CameraManager: NSObject, ObservableObject {
     
     // MARK: - Setup
     func setupCamera() {
+        guard !isRecording else { return }
+        isSessionReady = false
+        cameraError = nil
         print("🎬 Setting up camera...")
         
-        DispatchQueue.global(qos: .userInitiated).async { [weak self] in
+        sessionQueue.async { [weak self] in
             guard let self = self else { return }
             
             // Stop a previous session before creating a new one.
             self.captureSession?.stopRunning()
 
             self.captureSession = AVCaptureSession()
-            self.captureSession?.sessionPreset = self.videoQuality.preset
+            if self.captureSession?.canSetSessionPreset(self.videoQuality.preset) == true {
+                self.captureSession?.sessionPreset = self.videoQuality.preset
+            }
             
             guard let camera = self.getCamera(for: self.cameraPosition) else {
+                DispatchQueue.main.async { self.cameraError = "Câmera indisponível neste dispositivo." }
                 print("❌ Error: Could not access camera")
                 return
             }
@@ -82,6 +96,9 @@ class CameraManager: NSObject, ObservableObject {
                 // Video input
                 let videoInput = try AVCaptureDeviceInput(device: camera)
                 
+                guard self.captureSession?.canAddInput(videoInput) == true else {
+                    throw VideoExporter.failure("Não foi possível conectar a câmera.")
+                }
                 if self.captureSession?.canAddInput(videoInput) == true {
                     self.captureSession?.addInput(videoInput)
                     print("✅ Video input added")
@@ -112,6 +129,9 @@ class CameraManager: NSObject, ObservableObject {
                 // Set max recording duration (to prevent issues)
                 self.videoOutput?.maxRecordedDuration = CMTime(seconds: 60, preferredTimescale: 600)
                 
+                guard self.captureSession?.canAddOutput(self.videoOutput!) == true else {
+                    throw VideoExporter.failure("Não foi possível configurar a gravação.")
+                }
                 if self.captureSession?.canAddOutput(self.videoOutput!) == true {
                     self.captureSession?.addOutput(self.videoOutput!)
                     print("✅ Video output added")
@@ -127,10 +147,12 @@ class CameraManager: NSObject, ObservableObject {
                 
                 // Configure camera settings
                 self.configureCameraSettings(camera)
+                self.configureZoom(camera)
                 
                 // Create preview layer
+                guard let session = self.captureSession else { return }
                 DispatchQueue.main.async {
-                    let preview = AVCaptureVideoPreviewLayer(session: self.captureSession!)
+                    let preview = AVCaptureVideoPreviewLayer(session: session)
                     preview.videoGravity = .resizeAspectFill
                     self.previewLayer = preview
                     print("✅ Preview layer created")
@@ -142,12 +164,12 @@ class CameraManager: NSObject, ObservableObject {
                 
                 // Mark session as ready
                 DispatchQueue.main.async {
-                    self.isSessionReady = true
+                    self.isSessionReady = session.isRunning
                     print("✅ Camera is READY to record")
                 }
                 
             } catch {
-                print("❌ Error setting up camera: \(error.localizedDescription)")
+                DispatchQueue.main.async { self.cameraError = error.localizedDescription }
             }
         }
     }
@@ -191,36 +213,54 @@ class CameraManager: NSObject, ObservableObject {
     private func getCamera(for position: CameraPosition) -> AVCaptureDevice? {
         let avPosition: AVCaptureDevice.Position = position == .back ? .back : .front
 
-        // Do not use DiscoverySession.devices.first here.
-        // DiscoverySession does not guarantee the order of devices according
-        // to the requested deviceTypes. On some iPhones this can select a
-        // virtual camera (such as Dual Wide), where 1.0x may correspond to
-        // the ultra-wide lens.
-        //
-        // Explicitly request the physical Wide Angle camera. On iPhone 15
-        // this is the normal rear 1x camera.
-        if let wideAngle = AVCaptureDevice.default(
-            .builtInWideAngleCamera,
-            for: .video,
-            position: avPosition
-        ) {
-            print("📷 Selected camera: \(wideAngle.localizedName) [Wide Angle / 1x]")
-            return wideAngle
+        let types: [AVCaptureDevice.DeviceType] = position == .back
+            ? [.builtInTripleCamera, .builtInDualWideCamera, .builtInDualCamera, .builtInWideAngleCamera]
+            : [.builtInWideAngleCamera]
+        for type in types {
+            if let device = AVCaptureDevice.default(type, for: .video, position: avPosition) { return device }
         }
+        return nil
+    }
 
-        // Fallback, still restricted to Wide Angle so a virtual multi-camera
-        // device cannot accidentally be selected.
-        let discoverySession = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.builtInWideAngleCamera],
-            mediaType: .video,
-            position: avPosition
-        )
-
-        let camera = discoverySession.devices.first
-        if let camera {
-            print("📷 Selected fallback camera: \(camera.localizedName) [Wide Angle]")
+    private func configureZoom(_ camera: AVCaptureDevice) {
+        // Virtual-camera zoom starts at its widest lens. Normalize UI values to the wide lens.
+        let switches = camera.virtualDeviceSwitchOverVideoZoomFactors.map { CGFloat(truncating: $0) }
+        let hasUltraWide = camera.constituentDevices.contains { $0.deviceType == .builtInUltraWideCamera }
+        zoomMultiplier = hasUltraWide ? 1 / (switches.first ?? 2) : 1
+        let lower = camera.minAvailableVideoZoomFactor * zoomMultiplier
+        let upper = camera.maxAvailableVideoZoomFactor * zoomMultiplier
+        var options = [lower, CGFloat(1), CGFloat(2), CGFloat(5), CGFloat(8)] + switches.map { $0 * zoomMultiplier }
+        options = Array(Set(options.filter { $0 >= lower && $0 <= upper })).sorted()
+        do {
+            try camera.lockForConfiguration()
+            camera.videoZoomFactor = min(camera.maxAvailableVideoZoomFactor, max(camera.minAvailableVideoZoomFactor, 1 / zoomMultiplier))
+            camera.unlockForConfiguration()
+            let actual = camera.videoZoomFactor * zoomMultiplier
+            let limits = camera.minExposureTargetBias...camera.maxExposureTargetBias
+            DispatchQueue.main.async {
+                self.zoomOptions = options
+                self.zoom = actual
+                self.exposureRange = limits
+                self.exposure = camera.exposureTargetBias
+            }
+        } catch {
+            DispatchQueue.main.async { self.cameraError = error.localizedDescription }
         }
-        return camera
+    }
+
+    func setExposure(_ bias: Float) {
+        sessionQueue.async {
+            guard let camera = self.currentCamera else { return }
+            do {
+                try camera.lockForConfiguration()
+                let value = min(camera.maxExposureTargetBias, max(camera.minExposureTargetBias, bias))
+                camera.setExposureTargetBias(value, completionHandler: nil)
+                camera.unlockForConfiguration()
+                DispatchQueue.main.async { self.exposure = value }
+            } catch {
+                DispatchQueue.main.async { self.cameraError = error.localizedDescription }
+            }
+        }
     }
 
     // MARK: - Permissions
@@ -272,6 +312,23 @@ class CameraManager: NSObject, ObservableObject {
             return
         }
         
+        guard isSessionReady, !isRecording else { completion(nil); return }
+        let orientation = UIApplication.shared.connectedScenes
+            .compactMap { $0 as? UIWindowScene }.first?.interfaceOrientation ?? .portrait
+        let videoOrientation: AVCaptureVideoOrientation
+        switch orientation {
+        case .landscapeLeft: videoOrientation = .landscapeLeft
+        case .landscapeRight: videoOrientation = .landscapeRight
+        case .portraitUpsideDown: videoOrientation = .portraitUpsideDown
+        default: videoOrientation = .portrait
+        }
+        if let connection = videoOutput.connection(with: .video), connection.isVideoOrientationSupported {
+            connection.videoOrientation = videoOrientation
+        }
+        recordingAspect = aspectRatio.ratio(portrait: !orientation.isLandscape)
+        let identifier = UUID()
+        recordingID = identifier
+        isRecording = true
         // Store completion handler
         self.recordingCompletion = completion
         
@@ -289,8 +346,8 @@ class CameraManager: NSObject, ObservableObject {
             self.isRecording = true
             
             // Stop recording after duration
-            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(duration)) { [weak self] in
-                guard let self = self, videoOutput.isRecording else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + .seconds(duration)) {
+                guard self.recordingID == identifier, videoOutput.isRecording else { return }
                 print("⏹️ Stopping recording (duration reached)")
                 videoOutput.stopRecording()
             }
@@ -308,21 +365,24 @@ class CameraManager: NSObject, ObservableObject {
     }
     
     // MARK: - Camera Controls
-    func setZoom(_ zoom: CGFloat) {
-        guard let camera = currentCamera else { return }
-        
-        do {
-            try camera.lockForConfiguration()
-            camera.videoZoomFactor = max(1.0, min(zoom, camera.activeFormat.videoMaxZoomFactor))
-            camera.unlockForConfiguration()
-            
-            self.zoom = camera.videoZoomFactor
-        } catch {
-            print("❌ Error setting zoom: \(error)")
+    func setZoom(_ value: CGFloat) {
+        sessionQueue.async {
+            guard let camera = self.currentCamera else { return }
+            do {
+                try camera.lockForConfiguration()
+                camera.videoZoomFactor = max(camera.minAvailableVideoZoomFactor,
+                    min(value / self.zoomMultiplier, camera.maxAvailableVideoZoomFactor))
+                let actual = camera.videoZoomFactor * self.zoomMultiplier
+                camera.unlockForConfiguration()
+                DispatchQueue.main.async { self.zoom = actual }
+            } catch {
+                DispatchQueue.main.async { self.cameraError = error.localizedDescription }
+            }
         }
     }
-    
+
     func switchCamera() {
+        guard !isRecording, isSessionReady else { return }
         cameraPosition = cameraPosition == .back ? .front : .back
         setupCamera()
     }
@@ -338,23 +398,35 @@ extension CameraManager: AVCaptureFileOutputRecordingDelegate {
     }
     
     func fileOutput(_ output: AVCaptureFileOutput, didFinishRecordingTo outputFileURL: URL, from connections: [AVCaptureConnection], error: Error?) {
-        DispatchQueue.main.async {
-            self.isRecording = false
+        let successful = error == nil || ((error as NSError?)?.userInfo[AVErrorRecordingSuccessfullyFinishedKey] as? Bool == true)
+        let aspect = recordingAspect
+        Task {
+            var result: URL?
+            var failure: String?
+            if successful {
+                do {
+                    result = try await VideoExporter.export(urls: [outputFileURL], aspect: aspect)
+                    try? FileManager.default.removeItem(at: outputFileURL)
+                } catch {
+                    failure = "Não foi possível aplicar a proporção: \(error.localizedDescription). O original foi preservado no app."
+                    // Never discard a successful capture because postprocessing failed.
+                    result = outputFileURL
+                }
+            } else {
+                failure = error?.localizedDescription ?? "A gravação falhou."
+                try? FileManager.default.removeItem(at: outputFileURL)
+            }
+            await MainActor.run {
+                self.isRecording = false
+                self.recordingID = nil
+                self.cameraError = failure
+                let completion = self.recordingCompletion
+                self.recordingCompletion = nil
+                completion?(result)
+            }
         }
-        
-        if let error = error {
-            print("❌ Recording error: \(error.localizedDescription)")
-            recordingCompletion?(nil)
-        } else {
-            print("✅ Recording FINISHED successfully")
-            print("   File: \(outputFileURL.lastPathComponent)")
-            print("   Size: \(self.getFileSize(url: outputFileURL))")
-            recordingCompletion?(outputFileURL)
-        }
-        
-        recordingCompletion = nil
     }
-    
+
     private func getFileSize(url: URL) -> String {
         do {
             let attributes = try FileManager.default.attributesOfItem(atPath: url.path)

@@ -15,11 +15,12 @@ class SchedulerService: ObservableObject {
     @Published var captureInterval: Int = 3
     @Published var clipDuration: Int = 5
     @Published var sessionClipsCount: Int = 0
+    @Published var targetClipCount: Int = 10
     @Published var nextCaptureTime: Date = Date()
     
     @Published var useActiveHours: Bool = false
-    @Published var startTime: Date = Calendar.current.date(from: DateComponents(hour: 8, minute: 0))!
-    @Published var endTime: Date = Calendar.current.date(from: DateComponents(hour: 20, minute: 0))!
+    @Published var startTime: Date = Calendar.current.date(bySettingHour: 8, minute: 0, second: 0, of: Date()) ?? Date()
+    @Published var endTime: Date = Calendar.current.date(bySettingHour: 20, minute: 0, second: 0, of: Date()) ?? Date()
     
     private var timer: Timer?
     private var cameraManager: CameraManager?
@@ -33,7 +34,7 @@ class SchedulerService: ObservableObject {
     }
     
     func startScheduler() {
-        guard !isActive else {
+        guard !isActive, !isCapturing else {
             print("⚠️ Scheduler already active")
             return
         }
@@ -67,6 +68,7 @@ class SchedulerService: ObservableObject {
         timer = nil
         isActive = false
         isPaused = false
+        cameraManager?.stopRecording()
         
         print("⏹️ Scheduler stopped")
         print("   Total clips this session: \(sessionClipsCount)")
@@ -100,7 +102,7 @@ class SchedulerService: ObservableObject {
     }
     
     private func captureVideo() {
-        guard !isPaused else {
+        guard isActive, !isPaused else {
             print("⏸️ Capture skipped - paused")
             return
         }
@@ -155,6 +157,8 @@ class SchedulerService: ObservableObject {
             
             // Increment counter
             self.sessionClipsCount += 1
+            if self.sessionClipsCount >= self.targetClipCount { self.stopScheduler() }
+            else { self.nextCaptureTime = Date().addingTimeInterval(TimeInterval(self.captureInterval * 60)) }
             
             print("📊 Session clips: \(self.sessionClipsCount)")
             

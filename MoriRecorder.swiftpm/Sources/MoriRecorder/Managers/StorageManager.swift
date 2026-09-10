@@ -35,6 +35,7 @@ struct VideoClip: Identifiable {
 
 class StorageManager: ObservableObject {
     @Published var clips: [VideoClip] = []
+    @Published var lastError: String?
     
     private let documentsDirectory: URL
     private let clipsDirectory: URL
@@ -64,7 +65,7 @@ class StorageManager: ObservableObject {
     
     // MARK: - Save Clip (✅ CORRIGIDO: Agora salva na galeria)
     func saveClip(url: URL) {
-        let filename = "\(Date().timeIntervalSince1970).mov"
+        let filename = "\(Date().timeIntervalSince1970).\(url.pathExtension)"
         let destination = clipsDirectory.appendingPathComponent(filename)
         
         do {
@@ -150,110 +151,51 @@ class StorageManager: ObservableObject {
     
     // MARK: - Save to Photos (✅ CORRIGIDO)
     private func saveToPhotosLibrary(url: URL) {
-        PHPhotoLibrary.requestAuthorization { status in
-            guard status == .authorized else {
-                print("❌ Photo library access denied")
+        saveVideosToPhotos([url]) { _ in }
+    }
+
+    private func saveVideosToPhotos(_ urls: [URL], completion: @escaping (Bool) -> Void) {
+        PHPhotoLibrary.requestAuthorization(for: .addOnly) { status in
+            guard status == .authorized || status == .limited else {
+                DispatchQueue.main.async {
+                    self.lastError = "Permita adicionar vídeos ao Fotos nos Ajustes do iPhone. Os clipes continuam no app."
+                    completion(false)
+                }
                 return
             }
-            
             PHPhotoLibrary.shared().performChanges {
-                PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                for url in urls {
+                    PHAssetChangeRequest.creationRequestForAssetFromVideo(atFileURL: url)
+                }
             } completionHandler: { success, error in
-                if success {
-                    print("✅ Video saved to Photos library!")
-                } else {
-                    print("❌ Error saving to Photos: \(error?.localizedDescription ?? "unknown")")
+                DispatchQueue.main.async {
+                    self.lastError = success ? nil : (error?.localizedDescription ?? "Não foi possível salvar no Fotos.")
+                    completion(success)
                 }
             }
         }
     }
-    
-    // MARK: - Compile Videos (✅ CORRIGIDO: Agora funciona de verdade)
+
     func compileClips(selectedClips: [VideoClip], completion: @escaping (Bool, URL?) -> Void) {
-        guard !selectedClips.isEmpty else {
-            print("❌ No clips to compile")
-            completion(false, nil)
-            return
-        }
-        
-        print("🎬 Starting compilation of \(selectedClips.count) clips...")
-        
-        let composition = AVMutableComposition()
-        
-        guard let videoTrack = composition.addMutableTrack(withMediaType: .video, preferredTrackID: kCMPersistentTrackID_Invalid),
-              let audioTrack = composition.addMutableTrack(withMediaType: .audio, preferredTrackID: kCMPersistentTrackID_Invalid) else {
-            print("❌ Failed to create tracks")
-            completion(false, nil)
-            return
-        }
-        
-        var currentTime = CMTime.zero
-        
-        // Sort by capture date
-        let sortedClips = selectedClips.sorted { $0.captureDate < $1.captureDate }
-        
-        for clip in sortedClips {
-            let asset = AVAsset(url: clip.url)
-            
+        lastError = nil
+        let urls = selectedClips.sorted { $0.captureDate < $1.captureDate }.map(\.url)
+        Task {
             do {
-                // Add video track
-                if let assetVideoTrack = asset.tracks(withMediaType: .video).first {
-                    try videoTrack.insertTimeRange(
-                        CMTimeRange(start: .zero, duration: asset.duration),
-                        of: assetVideoTrack,
-                        at: currentTime
-                    )
-                    print("✅ Added video track from \(clip.url.lastPathComponent)")
+                let output = try await VideoExporter.export(urls: urls)
+                await MainActor.run {
+                    self.saveVideosToPhotos([output]) { success in
+                        completion(success, success ? output : nil)
+                    }
                 }
-                
-                // Add audio track
-                if let assetAudioTrack = asset.tracks(withMediaType: .audio).first {
-                    try audioTrack.insertTimeRange(
-                        CMTimeRange(start: .zero, duration: asset.duration),
-                        of: assetAudioTrack,
-                        at: currentTime
-                    )
-                    print("✅ Added audio track from \(clip.url.lastPathComponent)")
-                }
-                
-                currentTime = CMTimeAdd(currentTime, asset.duration)
             } catch {
-                print("❌ Error adding clip to composition: \(error.localizedDescription)")
-            }
-        }
-        
-        // Export
-        let timestamp = Date().timeIntervalSince1970
-        let outputURL = documentsDirectory.appendingPathComponent("Compiled_\(Int(timestamp)).mp4")
-        
-        guard let exportSession = AVAssetExportSession(asset: composition, presetName: AVAssetExportPresetHighestQuality) else {
-            print("❌ Failed to create export session")
-            completion(false, nil)
-            return
-        }
-        
-        exportSession.outputURL = outputURL
-        exportSession.outputFileType = .mp4
-        
-        print("🎬 Exporting to: \(outputURL.lastPathComponent)")
-        
-        exportSession.exportAsynchronously {
-            DispatchQueue.main.async {
-                if exportSession.status == .completed {
-                    print("✅ Export completed successfully!")
-                    
-                    // Save to Photos library
-                    self.saveToPhotosLibrary(url: outputURL)
-                    
-                    completion(true, outputURL)
-                } else {
-                    print("❌ Export failed: \(exportSession.error?.localizedDescription ?? "unknown")")
+                await MainActor.run {
+                    self.lastError = error.localizedDescription
                     completion(false, nil)
                 }
             }
         }
     }
-    
+
     // MARK: - Delete Clip (✅ CORRIGIDO)
     func deleteClip(_ clip: VideoClip) {
         do {
@@ -306,14 +248,12 @@ class StorageManager: ObservableObject {
     
     // MARK: - Upload Clips Separately (✅ NOVO)
     func uploadClipsSeparately(_ clipsToUpload: [VideoClip], completion: @escaping (Bool) -> Void) {
-        print("📤 Uploading \(clipsToUpload.count) clips separately...")
-        
-        // Save each to Photos library
-        for clip in clipsToUpload {
-            saveToPhotosLibrary(url: clip.url)
+        lastError = nil
+        guard !clipsToUpload.isEmpty else {
+            lastError = "Selecione pelo menos um clipe."
+            completion(false)
+            return
         }
-        
-        print("✅ All clips saved to Photos library")
-        completion(true)
+        saveVideosToPhotos(clipsToUpload.map(\.url), completion: completion)
     }
 }
