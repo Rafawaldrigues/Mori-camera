@@ -17,6 +17,7 @@ struct GalleryView: View {
     @State private var showDeleteAlert: Bool = false
     @State private var clipToDelete: VideoClip?
     @State private var isProcessing: Bool = false
+    @State private var showErrorAlert = false
     @State private var showSuccessAlert: Bool = false
     @State private var successMessage: String = ""
     
@@ -162,6 +163,7 @@ struct GalleryView: View {
                         onSeparate: uploadSeparate,
                         onDelete: deleteSelected
                     )
+                    .disabled(isProcessing)
                     .transition(.move(edge: .bottom))
                 }
             }
@@ -175,6 +177,11 @@ struct GalleryView: View {
                 }
             } message: {
                 Text("Este vídeo será deletado permanentemente do app.")
+            }
+            .alert("Não foi possível salvar", isPresented: $showErrorAlert) {
+                Button("OK", role: .cancel) { }
+            } message: {
+                Text(storageManager.lastError ?? "Não foi possível processar os vídeos.")
             }
             .alert("Sucesso!", isPresented: $showSuccessAlert) {
                 Button("OK") { }
@@ -210,6 +217,8 @@ struct GalleryView: View {
                     // Reset selection
                     isSelectionMode = false
                     selectedClips.removeAll()
+                } else {
+                    showErrorAlert = true
                 }
             }
         }
@@ -233,6 +242,8 @@ struct GalleryView: View {
                     // Reset selection
                     isSelectionMode = false
                     selectedClips.removeAll()
+                } else {
+                    showErrorAlert = true
                 }
             }
         }
@@ -372,7 +383,7 @@ struct UploadBar: View {
                         VStack(spacing: 4) {
                             Image(systemName: "square.stack.3d.up")
                                 .font(.system(size: 20))
-                            Text("Salvar\nSeparados")
+                            Text("Salvar Separadamente")
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                                 .multilineTextAlignment(.center)
                         }
@@ -388,7 +399,7 @@ struct UploadBar: View {
                         VStack(spacing: 4) {
                             Image(systemName: "film.stack")
                                 .font(.system(size: 20))
-                            Text("Compilar e\nSalvar")
+                            Text("Combinar Vídeos")
                                 .font(.system(size: 12, weight: .semibold, design: .rounded))
                                 .multilineTextAlignment(.center)
                         }

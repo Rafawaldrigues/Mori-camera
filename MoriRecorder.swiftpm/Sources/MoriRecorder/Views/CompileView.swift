@@ -38,7 +38,7 @@ struct CompileView: View {
                                         .font(.system(size: 20))
                                 }
                                 
-                                Text(isCompiling ? "Compilando..." : "Compilar Todos os Vídeos")
+                                Text(isCompiling ? "Compilando..." : "Combinar Vídeos")
                                     .font(.system(size: 18, weight: .semibold, design: .rounded))
                             }
                             .foregroundColor(.white)
@@ -60,13 +60,8 @@ struct CompileView: View {
                         // Progress Bar
                         if isCompiling {
                             VStack(spacing: 8) {
-                                ProgressView(value: compilationProgress, total: 1.0)
-                                    .progressViewStyle(LinearProgressViewStyle(tint: Theme.mint))
-                                    .scaleEffect(y: 2)
-                                
-                                Text("\(Int(compilationProgress * 100))%")
-                                    .font(.system(size: 14, design: .rounded))
-                                    .foregroundColor(Theme.textSecondary(isDark: appState.isDarkMode))
+                                ProgressView("Combinando e salvando no Fotos…")
+                                    .tint(Theme.mint)
                             }
                             .padding(.top)
                         }
@@ -87,7 +82,7 @@ struct CompileView: View {
             .alert("Erro na Compilação", isPresented: $showErrorAlert) {
                 Button("OK") { }
             } message: {
-                Text("Não foi possível compilar os vídeos. Tente novamente.")
+                Text(storageManager.lastError ?? "Não foi possível combinar os vídeos.")
             }
         }
     }
@@ -101,16 +96,9 @@ struct CompileView: View {
         
         print("🎬 Starting real compilation...")
         
-        // Simulate progress
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { timer in
-            if self.compilationProgress < 0.9 {
-                self.compilationProgress += 0.02
-            }
-        }
-        
         // ✅ REAL COMPILATION
         storageManager.compileClips(selectedClips: storageManager.clips) { success, url in
-            timer.invalidate()
+
             
             DispatchQueue.main.async {
                 self.compilationProgress = 1.0
@@ -198,19 +186,19 @@ struct InstructionsCard: View {
                 
                 InstructionRow(
                     icon: "square.grid.3x3",
-                    text: "Na Galeria, selecione vídeos específicos para fazer upload",
+                    text: "Na Galeria, selecione os vídeos que deseja salvar",
                     isDark: isDark
                 )
                 
                 InstructionRow(
                     icon: "square.stack.3d.up",
-                    text: "Botão 'Separados': envia cada vídeo individualmente",
+                    text: "Botão 'Salvar Separadamente': salva cada vídeo no Fotos",
                     isDark: isDark
                 )
                 
                 InstructionRow(
                     icon: "film.stack",
-                    text: "Botão 'Compilado': junta os selecionados em um vídeo",
+                    text: "Botão 'Combinar Vídeos': combina os selecionados em um vídeo",
                     isDark: isDark
                 )
             }

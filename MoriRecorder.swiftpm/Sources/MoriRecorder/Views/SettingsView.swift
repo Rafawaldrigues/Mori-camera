@@ -82,20 +82,13 @@ struct SettingsView: View {
                             }
                             .tint(Theme.mint)
                             
-                            Divider()
-                            
-                            // Audio Toggle
-                            Toggle(isOn: $cameraManager.audioEnabled) {
-                                HStack {
-                                    Image(systemName: cameraManager.audioEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                                        .foregroundColor(Theme.mint)
-                                    Text("Gravar Áudio")
-                                        .foregroundColor(Theme.textPrimary(isDark: appState.isDarkMode))
-                                }
-                            }
-                            .tint(Theme.mint)
                         }
-                        
+                        .disabled(schedulerService.isActive || !cameraManager.isSessionReady)
+                        .onChange(of: cameraManager.cameraPosition) { _ in cameraManager.setupCamera() }
+                        .onChange(of: cameraManager.videoQuality) { _ in cameraManager.setupCamera() }
+                        .onChange(of: cameraManager.hdrEnabled) { _ in cameraManager.setupCamera() }
+                        .onChange(of: cameraManager.stabilizationEnabled) { _ in cameraManager.setupCamera() }
+
                         // Schedule Section
                         SettingsSection(title: "Agendamento", isDark: appState.isDarkMode) {
                             // Active Hours

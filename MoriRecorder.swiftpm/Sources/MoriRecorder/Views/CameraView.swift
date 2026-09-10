@@ -18,15 +18,22 @@ struct CameraView: View {
     var body: some View {
         ZStack {
             // Camera Preview (fundo) - ✅ CORRIGIDO
-            CameraPreviewView(cameraManager: cameraManager)
-                .ignoresSafeArea()
+            Color.black.ignoresSafeArea()
+            GeometryReader { geometry in
+                CameraPreviewView(cameraManager: cameraManager)
+                    .aspectRatio(cameraManager.aspectRatio.ratio(portrait: geometry.size.height >= geometry.size.width), contentMode: .fit)
+                    .clipped()
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
             
             // Overlay escuro semi-transparente
             Color.black.opacity(0.3)
                 .ignoresSafeArea()
             
             // UI Controls (frente)
-            VStack(spacing: 20) {
+            GeometryReader { geometry in
+              ScrollView {
+               VStack(spacing: 20) {
                 // Header
                 HStack {
                     Text("Mori.Recorder")
@@ -58,8 +65,11 @@ struct CameraView: View {
                             .background(Circle().fill(Color.black.opacity(0.5)))
                     }
                 }
+                .disabled(schedulerService.isActive || !cameraManager.isSessionReady)
                 .padding(.horizontal)
-                .padding(.top, 50)
+                .padding(.top, 10)
+                CameraControlsPanel()
+                    .padding(.horizontal)
                 
                 Spacer()
                 
@@ -122,6 +132,9 @@ struct CameraView: View {
                 QuickSettingsPanel(isDark: true)
                     .padding(.horizontal)
                     .padding(.bottom, 30)
+               }
+               .frame(minHeight: geometry.size.height)
+              }
             }
         }
         .onAppear {
@@ -131,8 +144,17 @@ struct CameraView: View {
                 cameraManager.requestPermissions { granted in
                     print(granted ? "✅ Permissions granted, camera will initialize" : "❌ Permissions denied")
                     cameraInitialized = granted
+                    showingAlert = !granted
                 }
             }
+        }
+        .alert("Câmera", isPresented: Binding(
+            get: { cameraManager.cameraError != nil },
+            set: { if !$0 { cameraManager.cameraError = nil } }
+        )) {
+            Button("OK", role: .cancel) { cameraManager.cameraError = nil }
+        } message: {
+            Text(cameraManager.cameraError ?? "Não foi possível acessar a câmera.")
         }
         .alert("Permissões Necessárias", isPresented: $showingAlert) {
             Button("Configurações", action: openSettings)
@@ -152,6 +174,7 @@ struct CameraView: View {
         if schedulerService.isActive {
             schedulerService.stopScheduler()
         } else {
+            guard !cameraManager.isRecording else { return }
             schedulerService.startScheduler()
         }
     }
@@ -203,6 +226,15 @@ class PreviewView: UIView {
         layer.sublayers?.forEach { sublayer in
             if sublayer is AVCaptureVideoPreviewLayer {
                 sublayer.frame = bounds
+                if let preview = sublayer as? AVCaptureVideoPreviewLayer,
+                   let connection = preview.connection, connection.isVideoOrientationSupported {
+                    switch window?.windowScene?.interfaceOrientation {
+                    case .landscapeLeft: connection.videoOrientation = .landscapeLeft
+                    case .landscapeRight: connection.videoOrientation = .landscapeRight
+                    case .portraitUpsideDown: connection.videoOrientation = .portraitUpsideDown
+                    default: connection.videoOrientation = .portrait
+                    }
+                }
             }
         }
     }
@@ -237,7 +269,7 @@ struct StatusCard: View {
                 }
             }
             
-            Text("\(schedulerService.sessionClipsCount) clipes nesta sessão")
+            Text("Quantidade de clipes: \(schedulerService.sessionClipsCount)/\(schedulerService.targetClipCount)")
                 .font(.system(size: 13, design: .rounded))
                 .foregroundColor(.white.opacity(0.8))
         }
@@ -303,6 +335,10 @@ struct QuickSettingsPanel: View {
     
     var body: some View {
         VStack(spacing: 12) {
+            Stepper("Quantidade de clipes: \(schedulerService.targetClipCount)", value: $schedulerService.targetClipCount, in: 1...100)
+                .disabled(schedulerService.isActive)
+                .padding(10)
+                .background(Color.black.opacity(0.6).cornerRadius(12))
             HStack(spacing: 12) {
                 // Intervalo
                 HStack {
@@ -351,20 +387,7 @@ struct QuickSettingsPanel: View {
                         .fill(Color.black.opacity(0.6))
                 )
                 
-                // Áudio Toggle
-                Button(action: {
-                    cameraManager.audioEnabled.toggle()
-                }) {
-                    Image(systemName: cameraManager.audioEnabled ? "speaker.wave.2.fill" : "speaker.slash.fill")
-                        .foregroundColor(cameraManager.audioEnabled ? Theme.babyBlue : .gray)
-                        .font(.system(size: 20))
-                        .frame(width: 44, height: 44)
-                        .background(
-                            RoundedRectangle(cornerRadius: 12)
-                                .fill(Color.black.opacity(0.6))
-                        )
-                }
-                .disabled(schedulerService.isActive)
+
             }
         }
         .font(.system(size: 14, weight: .medium, design: .rounded))
